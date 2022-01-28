@@ -1,0 +1,366 @@
+#+TITLE: Emacs Configuration
+#+AUTHOR: Ratibor Siryi
+#+TOC: true
+#+DATE: Sun Jan 9 04:24 2022
+
+This is my Emacs configuration.
+
+* Setup
+** Core
+*** Garbage collector
+
+#+BEGIN_SRC emacs-lisp
+(setq gc-cons-threshold (* 100 1024 1024))
+#+END_SRC
+
+*** Process reading data amount
+
+#+BEGIN_SRC emacs-lisp
+(setq read-process-output-max (* 1024 1024))
+#+END_SRC
+
+** Clipboard
+
+#+BEGIN_SRC emacs-lisp
+(setq select-enable-primary t)
+(setq select-enable-clipboard t)
+(setq save-interprogram-paste-before-kill t)
+(setq save-interprogram-paste-before-kill t)
+#+END_SRC
+
+** Package System setup
+*** Configure package sources
+
+Add repositories from which we'll load packages and set =package-enable-at-startup= to =nil= to prevent a second package load and slightly improve startup time.
+
+#+BEGIN_SRC emacs-lisp
+(setq package-enable-at-startup nil)
+(setq package-archives '(("melpa" . "https://melpa.org/packages/")
+			 ("org" . "https://orgmode.org/elpa/")
+			 ("elpa" . "https://elpa.gnu.org/packages/")))
+#+END_SRC
+
+*** Setting up use-package
+
+#+BEGIN_SRC emacs-lisp
+(unless package-archive-contents
+  (package-refresh-contents))
+
+;; Initialize use-package on non-Linux platforms
+(unless (package-installed-p 'use-package)
+  (package-install 'use-package))
+
+(require 'use-package)
+(setq use-package-always-ensure t)
+#+END_SRC
+
+** 'PATH' environment variable
+
+I had some problems with 'PATH' environment variable while setting up a golang development environment, and I already can't fix it :(
+
+#+BEGIN_SRC emacs-lisp
+(use-package exec-path-from-shell)
+(when (daemonp)
+  (exec-path-from-shell-initialize))
+#+END_SRC
+
+** Filesystem
+*** Autosave and backup
+
+I didn't find these files useful, they're just garbaging my filesystem.
+
+#+BEGIN_SRC emacs-lisp
+(setq auto-save-default nil)
+(setq make-backup-files nil)
+#+END_SRC
+
+*** Custom settings file
+
+#+BEGIN_SRC emacs-lisp
+(setq custom-file (concat user-emacs-directory "/custom.el"))
+#+END_SRC
+
+*** Working with files as root
+
+#+BEGIN_SRC emacs-lisp
+(defadvice find-file (after find-file-sudo activate)
+  "Find file as root if necessary."
+  (unless (and buffer-file-name
+	       (file-writable-p buffer-file-name))
+    (find-alternate-file (concat "/sudo:root@localhost:" buffer-file-name))))
+#+END_SRC
+
+* Interface
+** Emacs UI
+*** Basics
+
+#+BEGIN_SRC emacs-lisp
+(setq inhibit-startup-message t)
+
+(scroll-bar-mode -1)        ; Disable visible scrollbar
+(tool-bar-mode -1)          ; Disable the toolbar
+(tooltip-mode -1)           ; Disable tooltips
+(set-fringe-mode 10)
+
+(menu-bar-mode -1)          ; Disable the menu bar
+
+(setq visible-bell t)
+#+END_SRC
+
+*** Completion
+
+#+BEGIN_SRC emacs-lisp
+  (use-package vertico
+    :init
+    (vertico-mode)
+    (setq vertico-cycle t))
+
+  (use-package orderless
+    :ensure t
+    :init
+    (setq completion-styles '(orderless)
+	  orderless-matching-styles '(orderless-regexp)
+	  orderless-component-separator #'orderless-escapable-split-on-space
+	  orderless-style-dispachers '(first-initialism
+				       flex-if-twiddle
+				       without-if-bang)))
+
+  (defun first-initialism (pattern index _total)
+    (if (= index 0) 'orderless-initialism))
+
+  (defun flex-if-twiddle (pattern _index _total)
+    (when (string-suffix-p "~" pattern)
+      `(orderless-flex . ,(substring pattern 0 -1))))
+
+  (defun without-if-bang (pattern _index _total)
+    (cond
+     ((equal "!" pattern)
+      '(orderless-literal . ""))
+     ((string-prefix-p "!" pattern)
+      `(orderless-without-literal . ,(substring pattern 1)))))
+#+END_SRC
+
+*** Modeline
+
+#+BEGIN_SRC emacs-lisp
+(use-package doom-modeline
+  :ensure t
+  :init (doom-modeline-mode 1))
+#+END_SRC
+
+** Editor
+*** Line numbers
+
+#+BEGIN_SRC emacs-lisp
+(setq-default display-line-numbers-type 'relative)
+(global-display-line-numbers-mode 1)
+#+END_SRC
+
+Disable line numbers for some modes:
+
+#+BEGIN_SRC emacs-lisp
+(dolist (mode '(org-mode-hook
+		term-mode-hook
+		eshell-mode-hook))
+  (add-hook mode (lambda () (display-line-numbers-mode 0))))
+#+END_SRC
+
+*** Electric-pair
+
+#+BEGIN_SRC emacs-lisp
+(use-package electric-pair
+  :ensure nil
+  :defer t
+  :hook (
+	 (prog-mode . electric-pair-mode)))
+#+END_SRC
+
+*** Hideshow
+
+#+BEGIN_SRC emacs-lisp
+  (use-package hideshow)
+  (add-hook 'prog-mode-hook
+	    (lambda () (hs-minor-mode 1)
+	      (hs-hide-all)
+	      (set (make-variable-buffer-local 'my-hs-hide) t)))
+  (defvar my-hs-hide t "Current state of hideshow for toggling all.")
+  ;;;###autoload
+  (defun my-toggle-hideshow-all ()
+    "Toggle hideshow all."
+    (interactive)
+    (set (make-variable-buffer-local 'my-hs-hide) (not my-hs-hide))
+    (if my-hs-hide
+	(hs-hide-all)
+      (hs-show-all)))
+  (global-set-key (kbd "C-c @ @") 'my-toggle-hideshow-all)
+  (global-set-key (kbd "C-c @ h") 'hs-hide-block)
+  (global-set-key (kbd "C-c @ s") 'hs-show-block)
+#+END_SRC
+
+* Programming
+** LSP setup
+
+#+BEGIN_SRC emacs-lisp
+  (use-package lsp-mode
+    :init (setq lsp-keymap-prefix "C-c l")
+    :hook (
+		   (rust-mode . lsp-deferred)
+		   (go-mode . lsp-deferred)
+		   (clojure-mode . lsp-deferred))
+    :commands lsp)
+  (setq lsp-use-plists t)
+  (setq lsp-idle-delay 0.500)
+  (setq lsp-log-io nil)
+
+  (defun lsp-go-install-save-hooks ()
+    (add-hook 'before-save-hook #'lsp-format-buffer t t)
+    (add-hook 'before-save-hook #'lsp-organize-imports t t))
+  (add-hook 'go-mode-hook #'lsp-go-install-save-hooks)
+#+END_SRC
+
+** Completion
+
+#+BEGIN_SRC emacs-lisp
+(use-package company
+  :hook (prog-mode . company-mode)
+  :config
+  (setq company-idle-delay 0)
+  (setq company-minimum-prefix-length 1))
+#+END_SRC
+
+** Rust
+
+#+BEGIN_SRC emacs-lisp
+(use-package rust-mode
+  :init
+  (setq rust-format-on-save t)
+  (setq tab-width 4)
+  (setq indent-tabs-mode t))
+#+END_SRC
+
+** Go
+
+#+BEGIN_SRC emacs-lisp
+(use-package go-mode
+  :init
+  (setq tab-width 4)
+  (setq indent-tabs-mode t))
+#+END_SRC
+
+* Appearance
+** Emacs UI
+*** Font configuration
+
+Works only on emacs daemon startup for now.
+
+#+BEGIN_SRC emacs-lisp
+(defun khuhxd/setup-font-faces ()
+  (set-face-attribute 'default nil
+		      :font
+		      (font-spec
+		       :family "CaskaydiaCove Nerd Font"
+		       :size 12.5
+		       :weight 'regular)))
+
+(add-hook 'server-after-make-frame-hook 'khuhxd/setup-font-faces)
+#+END_SRC
+
+*** Theming
+
+#+BEGIN_SRC emacs-lisp
+  ;; NOTE: The first time loading configuration on a new machine, you'll
+  ;; need to run the following command interactively so that mode line icons
+  ;; display correctly:
+  ;;
+  ;; M-x all-the-icons-install-fonts
+  (use-package all-the-icons
+    :if (display-graphic-p))
+
+  (use-package doom-themes
+    :init (load-theme 'doom-solarized-light t))
+#+END_SRC
+
+** Editor
+*** Indentation highlighting
+
+#+BEGIN_SRC emacs-lisp
+(use-package highlight-indent-guides
+  :hook (prog-mode . highlight-indent-guides-mode)
+  :config
+  (setq highlight-indent-guides-method 'column)
+  (setq highlight-indent-guides-responsive 'top))
+#+END_SRC
+
+*** Rainbow delimiters
+
+#+BEGIN_SRC emacs-lisp
+(use-package rainbow-delimiters
+  :hook (prog-mode . rainbow-delimiters-mode))
+#+END_SRC
+
+*** Current line highlighting
+
+#+BEGIN_SRC emacs-lisp
+(use-package hl-line
+  :hook (prog-mode . hl-line-mode))
+#+END_SRC
+
+* Org
+** Org config
+
+#+BEGIN_SRC emacs-lisp
+(use-package org
+  :config
+  (setq org-ellipsis " ▼"))
+#+END_SRC
+
+** Org-bullets
+
+#+BEGIN_SRC emacs-lisp
+(use-package org-bullets
+  :after org
+  :hook (org-mode . org-bullets-mode))
+(put 'set-goal-column 'disabled nil)
+(put 'upcase-region 'disabled nil)
+#+END_SRC
+
+* Terminal modes
+** Term-mode
+
+#+BEGIN_SRC emacs-lisp
+(use-package term
+  :config
+  (setq explicit-shell-file-name "bash")
+  (setq term-prompt-regexp "^[^#$%>\n]*[#$%>] *"))
+#+END_SRC
+
+* Project management
+** Projectile
+
+#+BEGIN_SRC emacs-lisp
+(use-package projectile
+  :ensure t
+  :init
+  (projectile-mode +1)
+  :bind (:map projectile-mode-map
+	      ("C-c p" . projectile-command-map)))
+#+END_SRC
+
+* Keybindings
+** Global
+*** Org
+
+#+BEGIN_SRC emacs-lisp
+(global-set-key (kbd "C-c C-l") 'org-store-link)
+(global-set-key (kbd "C-c C-a") 'org-agenda)
+(global-set-key (kbd "C-c C-c") 'org-capture)
+#+END_SRC
+
+* Snipets
+
+#+BEGIN_SRC emacs-lisp
+  (use-package yasnippet
+    :config
+    (setq yas-snippet-dirs '("~/.emacs.d/snippets/"))
+    (yas-global-mode 1))
+#+END_SRC
